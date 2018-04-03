@@ -1,0 +1,188 @@
+pragma solidity 0.4.21;
+library SafeMath {
+  function mul(uint256 a, uint256 b) internal pure returns (uint256) {
+    uint256 c = a * b;
+    assert(a == 0 || c / a == b);
+    return c;
+  }
+
+ function div(uint256 a, uint256 b) internal pure returns (uint256) {
+    assert(b > 0); // Solidity automatically throws when dividing by 0
+    uint256 c = a / b;
+    assert(a == b * c + a % b); // There is no case in which this doesn't hold
+    return c;
+  }
+
+  function sub(uint256 a, uint256 b) internal pure returns (uint256) {
+    assert(b <= a);
+    return a - b;
+  }
+
+  function add(uint256 a, uint256 b) internal pure returns (uint256) {
+    uint256 c = a + b;
+    assert(c >= a);
+    return c;
+  }
+}
+
+contract Ownable {
+  address public owner;
+
+
+  event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+
+
+  /**
+   * @dev The Ownable constructor sets the original `owner` of the contract to the sender
+   * account.
+   */
+  function Ownable() public {
+    owner = msg.sender;
+  }
+
+
+  /**
+   * @dev Throws if called by any account other than the owner.
+   */
+  modifier onlyOwner() {
+    require(msg.sender == owner);
+    _;
+  }
+
+
+  /**
+   * @dev Allows the current owner to transfer control of the contract to a newOwner.
+   * @param newOwner The address to transfer ownership to.
+   */
+  function transferOwnership(address newOwner) onlyOwner public {
+    require(newOwner != address(0));
+    emit OwnershipTransferred(owner, newOwner);
+    owner = newOwner;
+  }
+
+}
+
+contract Marketplace is Ownable
+{
+    using SafeMath for uint256;
+    
+    struct Vendor
+    {
+        address vendorAddress;
+        uint vendorShare;
+    }
+    struct Item
+    {
+        uint id;
+        string name;
+        uint price;
+        uint ownerShare;
+        Vendor[] vendors;
+    }
+    
+    uint[] itemIds;
+    mapping(uint=>Item) allItems;
+    mapping(uint=>address[]) vendorAddressesAgainstItem;
+    
+    event ItemAdded(uint itemId, string message);
+    event VendorAdded(uint itemId, string message);
+    
+    Item itemToBeAdded;
+    Vendor vendorToBeAdded;
+    Vendor[] _vendors;
+    
+    function Marketplace(address wallet) public {
+        owner = wallet;
+    }
+    
+    function addItem(uint _id, string _name, uint _price, uint _ownerShare, address[] vendorsAddresses, uint[] vendorsShares) public onlyOwner
+    {  
+        require(allItems[_id].price == 0);
+        require(vendorsAddresses.length >0 && vendorsAddresses.length == vendorsShares.length);
+        delete itemToBeAdded;
+        itemToBeAdded.id = _id;
+        itemToBeAdded.name = _name;
+        itemToBeAdded.price = _price;
+        itemToBeAdded.ownerShare = _ownerShare;
+        
+        uint256 allShares = _ownerShare;
+        
+        for (uint i=0;i<vendorsAddresses.length;i++)
+        {
+            vendorToBeAdded = Vendor({vendorAddress:vendorsAddresses[i],vendorShare:vendorsShares[i]});
+            itemToBeAdded.vendors.push(vendorToBeAdded);
+            emit VendorAdded(_id,"Vendor Added");
+            allShares = allShares.add(vendorsShares[i]);
+        }
+        require(allShares<=_price);
+        itemIds.push(_id);
+        allItems[_id]=itemToBeAdded;
+        vendorAddressesAgainstItem[_id] = vendorsAddresses;
+        emit ItemAdded(_id,"Item Added");
+        
+        
+    }
+    function allVendorsAdded(uint itemId) internal returns (bool)
+    {
+        itemToBeAdded = allItems[itemId];
+        _vendors = itemToBeAdded.vendors;
+        uint _sellPrice = itemToBeAdded.price;
+        uint _ownerShare = itemToBeAdded.ownerShare;
+        
+        uint _allVendorsShare = 0;
+        for (uint i=0;i<_vendors.length;i++)
+        {
+            _allVendorsShare = _allVendorsShare.add(_vendors[i].vendorShare);
+        }
+        
+        if (_ownerShare.add(_allVendorsShare) == _sellPrice)
+            return true;
+            
+        return false;
+    }
+    
+    function buyItem(uint id) public payable returns(bool)
+    {
+        require(msg.value >= allItems[id].price);
+        require(allVendorsAdded(id));
+        
+        itemToBeAdded = allItems[id];
+        _vendors = itemToBeAdded.vendors;
+        owner.transfer(itemToBeAdded.ownerShare);
+        
+        for (uint i=0;i<_vendors.length;i++)
+        {
+            _vendors[i].vendorAddress.transfer(_vendors[i].vendorShare);
+        }
+        
+        return true;
+    }
+    
+    function getAllItemIds() public constant returns (uint[])
+    {
+        return itemIds;
+    }
+    
+    function getItemById(uint id) public constant returns (uint itemId, string itemName, uint itemPrice, uint ownerShare)
+    {
+        itemToBeAdded = allItems[id];
+        return (itemToBeAdded.id,itemToBeAdded.name,itemToBeAdded.price,itemToBeAdded.ownerShare);
+    }
+    
+    function getVendorAddressesAgainstAnItem(uint id) public constant returns (address[])
+    {
+        return vendorAddressesAgainstItem[id];
+    }
+    
+    function getVendorDetailsByItemIdAndVendorAddress(uint id, address vendorAddr) public constant returns (address vendorAddress,uint share)
+    {
+        itemToBeAdded = allItems[id];
+        _vendors = itemToBeAdded.vendors;
+        for(uint i=0;i<_vendors.length;i++)
+        {
+            if (_vendors[i].vendorAddress == vendorAddr)
+                return (_vendors[i].vendorAddress,_vendors[i].vendorShare);
+        }
+        return (0x0,0);
+    }
+}
